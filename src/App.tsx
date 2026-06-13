@@ -25,6 +25,7 @@ interface MatchConfig {
   stage: string
   group: string
   aspectRatio: string
+  enableRecording: boolean
   events: MatchEvent[]
 }
 
@@ -40,6 +41,7 @@ const DEFAULT_CONFIG: MatchConfig = {
   stage: 'GROUP STAGE',
   group: '',
   aspectRatio: '9/16',
+  enableRecording: false,
   events: [],
 }
 
@@ -266,6 +268,11 @@ function Configurator({ config, onSave, onClose }: {
                   onChange={e => setDraft(d => ({ ...d, aspectRatio: `${d.aspectRatio.split('/')[0]}/${e.target.value}` }))} />
               </div>
             </div>
+            <label className="cfg-checkbox-row" htmlFor="enable-recording">
+              <input id="enable-recording" type="checkbox" checked={draft.enableRecording}
+                onChange={e => setDraft(d => ({ ...d, enableRecording: e.target.checked }))} />
+              <span>Record video on play</span>
+            </label>
           </section>
 
           {/* Events */}
@@ -370,6 +377,56 @@ export default function App() {
   const [lastFiredType, setLastFiredType] = useState<EventType | null>(null)
   const eventsRef = useRef(config.events)
   useEffect(() => { eventsRef.current = config.events }, [config.events])
+
+  // Recording
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+
+  const stopRecording = useCallback((delayMs = 0) => {
+    const stop = () => {
+      const mr = mediaRecorderRef.current
+      if (!mr || mr.state === 'inactive') return
+      mr.stop()
+    }
+    if (delayMs > 0) setTimeout(stop, delayMs)
+    else stop()
+  }, [])
+
+  // Returns true if recording started successfully, false if cancelled/denied
+  const startRecording = useCallback(async (): Promise<boolean> => {
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 60 } },
+        audio: true,
+        // @ts-expect-error not in all TS lib versions yet
+        preferCurrentTab: true,
+      })
+      const chunks: Blob[] = []
+      recordingChunksRef.current = chunks
+      // Pick best available codec: VP9 at high bitrate, fall back to default
+      const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9,opus')
+        ? 'video/webm; codecs=vp9,opus'
+        : 'video/webm'
+      const mr = new MediaRecorder(displayStream, { mimeType, videoBitsPerSecond: 8_000_000 })
+      mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
+      mr.onstop = () => {
+        for (const t of displayStream.getTracks()) t.stop()
+        const blob = new Blob(chunks, { type: 'video/webm' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `match-${Date.now()}.webm`
+        a.click()
+        URL.revokeObjectURL(url)
+        mediaRecorderRef.current = null
+      }
+      mediaRecorderRef.current = mr
+      mr.start(100)
+      return true
+    } catch {
+      return false
+    }
+  }, [])
 
   const resetPlayback = useCallback(() => {
     setPlaying(false)
@@ -477,25 +534,36 @@ export default function App() {
     return () => clearInterval(id)
   }, [playing])
 
+  // Stop recording 3s after fulltime card appears
+  useEffect(() => {
+    if (spotlight?.kind === 'fulltime') stopRecording(3000)
+  }, [spotlight, stopRecording])
+
   const toggleConfig = useCallback(() => setShowConfig(v => !v), [])
-  const togglePlay = useCallback(() => {
-    setPlaying(v => {
-      if (!v && currentMinute >= 90) {
+  const togglePlay = useCallback(async () => {
+    if (!playing) {
+      if (config.enableRecording) {
+        const granted = await startRecording()
+        if (!granted) return // user cancelled picker, don't start playback
+      }
+      if (currentMinute >= 90) {
         resetPlayback()
         setTimeout(() => {
           setSpotlight({ kind: 'matchstart' })
           pausedRef.current = true; pausedForRef.current = 3000
           setPlaying(true)
         }, 50)
-        return false
+        return
       }
-      if (!v && currentMinute === 0) {
+      if (currentMinute === 0) {
         setSpotlight({ kind: 'matchstart' })
         pausedRef.current = true; pausedForRef.current = 3000
       }
-      return !v
-    })
-  }, [currentMinute, resetPlayback])
+      setPlaying(true)
+    } else {
+      setPlaying(false)
+    }
+  }, [playing, currentMinute, resetPlayback, startRecording, config.enableRecording])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
