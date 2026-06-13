@@ -1063,10 +1063,10 @@ body {
 .cfg-select {
   flex: 1;
   min-width: 0;
-  background: #1a1a1a;
+  background: #fff;
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 6px;
-  color: #fff;
+  color: #000;
   font-family: 'Barlow Condensed', Arial, sans-serif;
   font-size: 12px;
   padding: 5px 8px;
@@ -1074,10 +1074,20 @@ body {
   cursor: pointer;
 }
 
-.cfg-select option,
-.cfg-select optgroup {
-  background: #1a1a1a;
+.cfg-select option {
+  background: #fff;
+  color: #000;
+}
+
+.cfg-select option:checked,
+.cfg-select option:hover {
+  background: #000;
   color: #fff;
+}
+
+.cfg-select optgroup {
+  background: #fff;
+  color: #000;
 }
 
 .cfg-select--team { max-width: 140px; }
