@@ -329,6 +329,7 @@ function Configurator({ config, onSave, onClose }: {
 // ── Playback types ─────────────────────────────────────
 type SpotlightEvent =
   | { kind: 'match'; event: MatchEvent }
+  | { kind: 'matchstart' }
   | { kind: 'halftime' }
   | { kind: 'fulltime' }
 
@@ -376,7 +377,7 @@ export default function App() {
       if (pausedFor > 0) {
         setPausedFor(p => {
           const next = p - TICK_MS
-          if (next <= 0) { setSpotlight(null); setTimeout(() => setLastFiredType(null), 1500) }
+          if (next <= 0) { setSpotlight(null); setFlashType(null); setTimeout(() => setLastFiredType(null), 1500) }
           return Math.max(0, next)
         })
         return
@@ -421,8 +422,11 @@ export default function App() {
           return inFirstHalfAdded || next > 90 ? next : Math.min(next, 90)
         }
 
-        // Halftime: after all base-45 events (regular + added-time) are shown
-        if (next >= 45 && !halfFiredRef.current && !pendingHalfTimeBlock && !pendingFirstHalfAdded) {
+        // Halftime: after all first-half events shown, require clock 1 min past last added-time event
+        const maxFirstHalfMinute = events
+          .filter(e => e.minute <= 45)
+          .reduce((max, e) => Math.max(max, e.minute + e.addedTime), 45)
+        if (next >= maxFirstHalfMinute + 1 && !halfFiredRef.current && !pendingHalfTimeBlock && !pendingFirstHalfAdded) {
           halfFiredRef.current = true
           setSpotlight({ kind: 'halftime' })
           setPausedFor(3000)
@@ -456,10 +460,17 @@ export default function App() {
   const togglePlay = useCallback(() => {
     setPlaying(v => {
       if (!v && currentMinute >= 90) {
-        // restart
         resetPlayback()
-        setTimeout(() => setPlaying(true), 50)
+        setTimeout(() => {
+          setSpotlight({ kind: 'matchstart' })
+          setPausedFor(3000)
+          setPlaying(true)
+        }, 50)
         return false
+      }
+      if (!v && currentMinute === 0) {
+        setSpotlight({ kind: 'matchstart' })
+        setPausedFor(3000)
       }
       return !v
     })
@@ -480,14 +491,20 @@ export default function App() {
   // Fire confetti / flash when spotlight changes to an event
   const prevSpotlightId = useRef<string | null>(null)
   useEffect(() => {
-    if (spotlight?.kind !== 'match') { prevSpotlightId.current = null; return }
+    if (!spotlight) { prevSpotlightId.current = null; return }
+
+    if (spotlight.kind === 'halftime' || spotlight.kind === 'fulltime' || spotlight.kind === 'matchstart') {
+      prevSpotlightId.current = spotlight.kind
+      setFlashType(null) // no card flash for these, handled by spotlight CSS
+      return
+    }
+
     const ev = spotlight.event
     if (ev.id === prevSpotlightId.current) return
     prevSpotlightId.current = ev.id
 
     setFlashType(ev.type)
     setLastFiredType(ev.type)
-    setTimeout(() => setFlashType(null), 600)
 
     if (ev.type === 'goal') {
       // Own goal scores for the opponent, so celebrate with opponent's color
@@ -576,40 +593,36 @@ export default function App() {
 
             <div className="pitch-area">
               {displaySpotlight ? (
-                <div className={`event-spotlight${flashType ? ` event-spotlight--flash-${flashType}` : ''}`}>
-                  {displaySpotlight.kind === 'halftime' ? (
-                    <>
-                      <div className="spotlight-badge">
-                        <span className="spotlight-badge-line" />
-                        <span className="spotlight-badge-text">Half Time</span>
-                        <span className="spotlight-badge-line" />
-                      </div>
-                      <div className="spotlight-main spotlight-main--centered">
-                        <span className="spotlight-halftime-icon">⏱</span>
-                        <span className="spotlight-halftime-text">HALF TIME</span>
-                        <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
-                      </div>
-                    </>
+                <div className={[
+                  'event-spotlight',
+                  flashType ? `event-spotlight--flash-${flashType}` : '',
+                  displaySpotlight.kind === 'halftime' ? 'event-spotlight--flash-halftime' : '',
+                  displaySpotlight.kind === 'fulltime' ? 'event-spotlight--flash-fulltime' : '',
+                  displaySpotlight.kind === 'matchstart' ? 'event-spotlight--flash-matchstart' : '',
+                ].filter(Boolean).join(' ')}>
+                  {displaySpotlight.kind === 'matchstart' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">🏟</span>
+                      <span className="spotlight-halftime-text">KICK OFF</span>
+                      <span className="spotlight-halftime-score">{config.homeTeam} vs {config.awayTeam}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'halftime' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">⏱</span>
+                      <span className="spotlight-halftime-text">HALF TIME</span>
+                      <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
                   ) : displaySpotlight.kind === 'fulltime' ? (
-                    <>
-                      <div className="spotlight-badge">
-                        <span className="spotlight-badge-line" />
-                        <span className="spotlight-badge-text">Full Time</span>
-                        <span className="spotlight-badge-line" />
-                      </div>
-                      <div className="spotlight-main spotlight-main--centered">
-                        <span className="spotlight-halftime-icon">🏁</span>
-                        <span className="spotlight-halftime-text">FULL TIME</span>
-                        <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
-                      </div>
-                    </>
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">🏁</span>
+                      <span className="spotlight-halftime-text">FULL TIME</span>
+                      <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
                   ) : (
                     <>
                       <div className="spotlight-badge">
                         <span className="spotlight-badge-line" />
-                        <span className="spotlight-badge-text">
-                          {playing || currentMinute > 0 ? 'Latest Event' : 'Latest Event'}
-                        </span>
+                        <span className="spotlight-badge-text">Latest Event</span>
                         <span className="spotlight-badge-line" />
                       </div>
                       <div className={`spotlight-type-banner spotlight-type-banner--${displaySpotlight.event.type}`}>
