@@ -334,7 +334,7 @@ type SpotlightEvent =
 
 // 2 match minutes = 1 real second → tick every 100ms = 0.2 match minutes
 const TICK_MS = 100
-const MINS_PER_TICK = 0.2   // 2 mins/s ÷ 10 ticks/s
+const MINS_PER_TICK = 0.5   // 5 mins/s
 
 export default function App() {
   const [config, setConfig] = useState<MatchConfig>(loadConfig)
@@ -376,7 +376,7 @@ export default function App() {
       if (pausedFor > 0) {
         setPausedFor(p => {
           const next = p - TICK_MS
-          if (next <= 0) { setSpotlight(null); setTimeout(() => setLastFiredType(null), 2000) }
+          if (next <= 0) { setSpotlight(null); setTimeout(() => setLastFiredType(null), 1500) }
           return Math.max(0, next)
         })
         return
@@ -417,7 +417,7 @@ export default function App() {
         if (triggered) {
           firedRef.current.add(triggered.id)
           setSpotlight({ kind: 'match', event: triggered })
-          setPausedFor(5000)
+          setPausedFor(3000)
           return inFirstHalfAdded || next > 90 ? next : Math.min(next, 90)
         }
 
@@ -425,7 +425,7 @@ export default function App() {
         if (next >= 45 && !halfFiredRef.current && !pendingHalfTimeBlock && !pendingFirstHalfAdded) {
           halfFiredRef.current = true
           setSpotlight({ kind: 'halftime' })
-          setPausedFor(5000)
+          setPausedFor(3000)
           return next
         }
 
@@ -437,7 +437,7 @@ export default function App() {
         if (next >= maxEventMinute + 1 && !fullFiredRef.current && !pendingAny) {
           fullFiredRef.current = true
           setSpotlight({ kind: 'fulltime' })
-          setPausedFor(5000)
+          setPausedFor(3000)
           setPlaying(false)
           return next
         }
@@ -539,7 +539,9 @@ export default function App() {
           <div className="content">
 
             <div className="header">
-              <img src="/FIFA-2026-World-Cup-Logo.png" alt="FIFA World Cup 2026" className="fifa-logo" />
+              <button type="button" className="fifa-logo-btn" onClick={toggleConfig}>
+                <img src="/FIFA-2026-World-Cup-Logo.png" alt="FIFA World Cup 2026" className="fifa-logo" />
+              </button>
               <h1 className="tournament-title">WORLD CUP <span className="year">2026</span></h1>
             </div>
 
@@ -550,11 +552,11 @@ export default function App() {
               <div className="team-bar team-bar--home" style={{ '--c1': homeColor, '--c2': homeColor2 } as React.CSSProperties}>
                 <span className="team-name">{config.homeTeam}</span>
               </div>
-              <div className="score-box">
+              <button type="button" className="score-box" onClick={togglePlay}>
                 <span className="score-num">{scores.home}</span>
                 <span className="score-sep">:</span>
                 <span className="score-num">{scores.away}</span>
-              </div>
+              </button>
               <div className="team-bar team-bar--away" style={{ '--c1': awayColor2, '--c2': awayColor } as React.CSSProperties}>
                 <span className="team-name">{config.awayTeam}</span>
               </div>
