@@ -24,6 +24,7 @@ interface MatchConfig {
   awayInitials: string
   stage: string
   group: string
+  aspectRatio: string
   events: MatchEvent[]
 }
 
@@ -38,6 +39,7 @@ const DEFAULT_CONFIG: MatchConfig = {
   awayInitials: '',
   stage: 'GROUP STAGE',
   group: '',
+  aspectRatio: '9/16',
   events: [],
 }
 
@@ -252,6 +254,18 @@ function Configurator({ config, onSave, onClose }: {
                 <span className="cfg-group-value">{draft.group}</span>
               </div>
             )}
+            <div className="cfg-field-row">
+              <label className="cfg-label" htmlFor="ar-w">Aspect Ratio</label>
+              <div className="cfg-aspect-inputs">
+                <input id="ar-w" type="number" className="cfg-score-input" min="1" step="0.5"
+                  value={draft.aspectRatio.split('/')[0]}
+                  onChange={e => setDraft(d => ({ ...d, aspectRatio: `${e.target.value}/${d.aspectRatio.split('/')[1]}` }))} />
+                <span className="cfg-aspect-sep">:</span>
+                <input type="number" className="cfg-score-input" min="1" step="0.5"
+                  value={draft.aspectRatio.split('/')[1]}
+                  onChange={e => setDraft(d => ({ ...d, aspectRatio: `${d.aspectRatio.split('/')[0]}/${e.target.value}` }))} />
+              </div>
+            </div>
           </section>
 
           {/* Events */}
@@ -598,7 +612,7 @@ export default function App() {
 
   return (
     <>
-      <div className="page">
+      <div className="page" style={{ width: `calc(100svh * ${config.aspectRatio})` }}>
         <div className="card">
           <div className="content">
 

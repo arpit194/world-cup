@@ -9,9 +9,8 @@ body {
 
 /* ── Page shell: 9:16 box centred in viewport ── */
 .page {
-  /* height = 100svh, width = 100svh × (9/16) */
   height: 100svh;
-  width: calc(100svh * 9 / 16);
+  width: calc(100svh * 9 / 16); /* overridden by inline style from config */
   max-width: 100vw;
   flex-shrink: 0;
   position: relative;
@@ -965,6 +964,17 @@ body {
 
 .cfg-score-input {
   max-width: 70px;
+}
+
+.cfg-aspect-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cfg-aspect-sep {
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
 }
 
 .cfg-minute-row {
