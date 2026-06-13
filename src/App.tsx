@@ -495,14 +495,52 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [toggleConfig, togglePlay, resetPlayback])
 
-  // Fire confetti / flash when spotlight changes to an event
+  // Fire confetti / flash / audio when spotlight changes
   const prevSpotlightId = useRef<string | null>(null)
-  useEffect(() => {
-    if (!spotlight) { prevSpotlightId.current = null; return }
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
 
-    if (spotlight.kind === 'halftime' || spotlight.kind === 'fulltime' || spotlight.kind === 'matchstart') {
+  const stopAudio = useCallback(() => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current.currentTime = 0
+      currentAudioRef.current = null
+    }
+  }, [])
+
+  const playAudio = useCallback((src: string) => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current.currentTime = 0
+    }
+    const audio = new Audio(src)
+    audio.volume = 0.8
+    currentAudioRef.current = audio
+    audio.play().catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!spotlight) {
+      prevSpotlightId.current = null
+      stopAudio()
+      return
+    }
+
+    if (spotlight.kind === 'matchstart') {
       prevSpotlightId.current = spotlight.kind
-      setFlashType(null) // no card flash for these, handled by spotlight CSS
+      setFlashType(null)
+      playAudio('/Half_Time.mp3')
+      return
+    }
+    if (spotlight.kind === 'halftime') {
+      prevSpotlightId.current = spotlight.kind
+      setFlashType(null)
+      playAudio('/Half_Time.mp3')
+      return
+    }
+    if (spotlight.kind === 'fulltime') {
+      prevSpotlightId.current = spotlight.kind
+      setFlashType(null)
+      playAudio('/Final_wistle.mp3')
       return
     }
 
@@ -512,6 +550,8 @@ export default function App() {
 
     setFlashType(ev.type)
     setLastFiredType(ev.type)
+
+    playAudio(ev.type === 'goal' ? '/GOAL.mp3' : '/card.mp3')
 
     if (ev.type === 'goal') {
       // Own goal scores for the opponent, so celebrate with opponent's color
@@ -523,7 +563,7 @@ export default function App() {
       confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 }, colors: [teamColor, teamColor2] })
       setTimeout(() => confetti({ particleCount: 60, spread: 120, origin: { y: 0.4 }, colors: [teamColor, teamColor2] }), 400)
     }
-  }, [spotlight, config.homeTeam, config.awayTeam])
+  }, [spotlight, config.homeTeam, config.awayTeam, playAudio, stopAudio])
 
   // Derive display values
   const displayTime = (() => {
