@@ -345,13 +345,14 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [currentMinute, setCurrentMinute] = useState(0)
   const [spotlight, setSpotlight] = useState<SpotlightEvent | null>(null)
-  const [pausedFor, setPausedFor] = useState(0)
+  const pausedForRef = useRef(0)
   const [flashType, setFlashType] = useState<EventType | null>(null)
 
   // Track which event minutes have already fired
   const firedRef = useRef<Set<string>>(new Set())
   const halfFiredRef = useRef(false)
   const fullFiredRef = useRef(false)
+  const pausedRef = useRef(false) // sync ref so interval sees pause immediately
   const [lastFiredType, setLastFiredType] = useState<EventType | null>(null)
   const eventsRef = useRef(config.events)
   useEffect(() => { eventsRef.current = config.events }, [config.events])
@@ -360,7 +361,8 @@ export default function App() {
     setPlaying(false)
     setCurrentMinute(0)
     setSpotlight(null)
-    setPausedFor(0)
+    pausedRef.current = false
+    pausedForRef.current = 0
     firedRef.current = new Set()
     halfFiredRef.current = false
     fullFiredRef.current = false
@@ -374,12 +376,15 @@ export default function App() {
   useEffect(() => {
     if (!playing) return
     const id = setInterval(() => {
-      if (pausedFor > 0) {
-        setPausedFor(p => {
-          const next = p - TICK_MS
-          if (next <= 0) { setSpotlight(null); setFlashType(null); setTimeout(() => setLastFiredType(null), 1500) }
-          return Math.max(0, next)
-        })
+      if (pausedRef.current) {
+        pausedForRef.current -= TICK_MS
+        if (pausedForRef.current <= 0) {
+          pausedRef.current = false
+          pausedForRef.current = 0
+          setSpotlight(null)
+          setFlashType(null)
+          setTimeout(() => setLastFiredType(null), 1500)
+        }
         return
       }
 
@@ -415,21 +420,23 @@ export default function App() {
             return true
           })
 
+        const startPause = () => { pausedRef.current = true; pausedForRef.current = 3000 }
+
         if (triggered) {
           firedRef.current.add(triggered.id)
           setSpotlight({ kind: 'match', event: triggered })
-          setPausedFor(3000)
+          startPause()
           return inFirstHalfAdded || next > 90 ? next : Math.min(next, 90)
         }
 
-        // Halftime: after all first-half events shown, require clock 1 min past last added-time event
+        // Halftime: after all first-half events shown AND clock is 1 min past the last one
         const maxFirstHalfMinute = events
           .filter(e => e.minute <= 45)
           .reduce((max, e) => Math.max(max, e.minute + e.addedTime), 45)
         if (next >= maxFirstHalfMinute + 1 && !halfFiredRef.current && !pendingHalfTimeBlock && !pendingFirstHalfAdded) {
           halfFiredRef.current = true
           setSpotlight({ kind: 'halftime' })
-          setPausedFor(3000)
+          startPause()
           return next
         }
 
@@ -441,7 +448,7 @@ export default function App() {
         if (next >= maxEventMinute + 1 && !fullFiredRef.current && !pendingAny) {
           fullFiredRef.current = true
           setSpotlight({ kind: 'fulltime' })
-          setPausedFor(3000)
+          startPause()
           setPlaying(false)
           return next
         }
@@ -454,7 +461,7 @@ export default function App() {
       })
     }, TICK_MS)
     return () => clearInterval(id)
-  }, [playing, pausedFor])
+  }, [playing])
 
   const toggleConfig = useCallback(() => setShowConfig(v => !v), [])
   const togglePlay = useCallback(() => {
@@ -463,14 +470,14 @@ export default function App() {
         resetPlayback()
         setTimeout(() => {
           setSpotlight({ kind: 'matchstart' })
-          setPausedFor(3000)
+          pausedRef.current = true; pausedForRef.current = 3000
           setPlaying(true)
         }, 50)
         return false
       }
       if (!v && currentMinute === 0) {
         setSpotlight({ kind: 'matchstart' })
-        setPausedFor(3000)
+        pausedRef.current = true; pausedForRef.current = 3000
       }
       return !v
     })
