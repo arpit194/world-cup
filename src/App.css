@@ -587,7 +587,7 @@ body {
 /* Pitch area: minute display when no spotlight */
 .pitch-minute-display {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 72px;
+  font-size: 144px;
   font-weight: 900;
   color: #fff;
   letter-spacing: 4px;
@@ -1063,8 +1063,8 @@ body {
 .cfg-select {
   flex: 1;
   min-width: 0;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: 6px;
   color: #fff;
   font-family: 'Barlow Condensed', Arial, sans-serif;
@@ -1072,6 +1072,12 @@ body {
   padding: 5px 8px;
   outline: none;
   cursor: pointer;
+}
+
+.cfg-select option,
+.cfg-select optgroup {
+  background: #1a1a1a;
+  color: #fff;
 }
 
 .cfg-select--team { max-width: 140px; }
