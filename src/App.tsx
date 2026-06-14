@@ -26,6 +26,9 @@ interface MatchConfig {
   group: string
   aspectRatio: string
   enableRecording: boolean
+  hasExtraTime: boolean
+  hasPenalties: boolean
+  penalties: Penalty[]
   events: MatchEvent[]
 }
 
@@ -42,6 +45,9 @@ const DEFAULT_CONFIG: MatchConfig = {
   group: '',
   aspectRatio: '9/16',
   enableRecording: false,
+  hasExtraTime: false,
+  hasPenalties: false,
+  penalties: [],
   events: [],
 }
 
@@ -268,6 +274,16 @@ function Configurator({ config, onSave, onClose }: {
                   onChange={e => setDraft(d => ({ ...d, aspectRatio: `${d.aspectRatio.split('/')[0]}/${e.target.value}` }))} />
               </div>
             </div>
+            <label className="cfg-checkbox-row" htmlFor="has-extra-time">
+              <input id="has-extra-time" type="checkbox" checked={draft.hasExtraTime}
+                onChange={e => setDraft(d => ({ ...d, hasExtraTime: e.target.checked }))} />
+              <span>Extra Time</span>
+            </label>
+            <label className="cfg-checkbox-row" htmlFor="has-penalties">
+              <input id="has-penalties" type="checkbox" checked={draft.hasPenalties}
+                onChange={e => setDraft(d => ({ ...d, hasPenalties: e.target.checked }))} />
+              <span>Penalty Shootout</span>
+            </label>
             <label className="cfg-checkbox-row" htmlFor="enable-recording">
               <input id="enable-recording" type="checkbox" checked={draft.enableRecording}
                 onChange={e => setDraft(d => ({ ...d, enableRecording: e.target.checked }))} />
@@ -305,7 +321,7 @@ function Configurator({ config, onSave, onClose }: {
                     </Field>
                     <div className="cfg-minute-row">
                       <Field label="Minute" id={`ev-minute-${ev.id}`}>
-                        <input id={`ev-minute-${ev.id}`} type="number" min={1} max={90} value={ev.minute}
+                        <input id={`ev-minute-${ev.id}`} type="number" min={1} max={120} value={ev.minute}
                           onChange={e => updateEvent(ev.id, 'minute', parseInt(e.target.value, 10) || 1)} className="cfg-score-input" />
                       </Field>
                       <Field label="+Added" id={`ev-added-${ev.id}`}>
@@ -329,6 +345,43 @@ function Configurator({ config, onSave, onClose }: {
             </div>
             <button type="button" className="cfg-add-btn cfg-add-btn--below" onClick={addEvent}>+ Add Event</button>
           </section>
+
+          {draft.hasPenalties && (
+            <section className="cfg-section">
+              <div className="cfg-section-header">
+                <h2 className="cfg-section-title">Penalties</h2>
+              </div>
+              <div className="cfg-events-list">
+                {draft.penalties.length === 0 && (
+                  <div className="cfg-empty">No penalties yet. Add kicks in order.</div>
+                )}
+                {draft.penalties.map((p, i) => (
+                  <div key={p.id} className="cfg-event-card cfg-event-card--penalty">
+                    <div className="cfg-event-top">
+                      <span className="cfg-event-icon">{p.scored ? '⚽' : '❌'}</span>
+                      <span className="cfg-penalty-num">#{i + 1}</span>
+                      <select value={p.team} onChange={e => setDraft(d => ({ ...d, penalties: d.penalties.map(x => x.id === p.id ? { ...x, team: e.target.value as 'home' | 'away' } : x) }))} className="cfg-select cfg-select--team">
+                        <option value="home">Home ({draft.homeTeam})</option>
+                        <option value="away">Away ({draft.awayTeam})</option>
+                      </select>
+                      <button type="button" className="cfg-remove-btn" onClick={() => setDraft(d => ({ ...d, penalties: d.penalties.filter(x => x.id !== p.id) }))} aria-label="Remove">✕</button>
+                    </div>
+                    <div className="cfg-event-fields">
+                      <Field label="Player" id={`pen-player-${p.id}`}>
+                        <input id={`pen-player-${p.id}`} value={p.player} onChange={e => setDraft(d => ({ ...d, penalties: d.penalties.map(x => x.id === p.id ? { ...x, player: e.target.value } : x) }))} placeholder="Player name" />
+                      </Field>
+                      <label className="cfg-checkbox-row" htmlFor={`pen-scored-${p.id}`}>
+                        <input id={`pen-scored-${p.id}`} type="checkbox" checked={p.scored}
+                          onChange={e => setDraft(d => ({ ...d, penalties: d.penalties.map(x => x.id === p.id ? { ...x, scored: e.target.checked } : x) }))} />
+                        Scored
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="cfg-add-btn cfg-add-btn--below" onClick={() => setDraft(d => ({ ...d, penalties: [...d.penalties, { id: Date.now().toString(), team: 'home', player: '', scored: true }] }))}>+ Add Kick</button>
+            </section>
+          )}
         </div>
 
         <div className="cfg-footer">
@@ -348,11 +401,24 @@ function Configurator({ config, onSave, onClose }: {
 
 // ── Main App ───────────────────────────────────────────
 // ── Playback types ─────────────────────────────────────
+interface Penalty {
+  id: string
+  team: 'home' | 'away'
+  player: string
+  scored: boolean
+}
+
 type SpotlightEvent =
   | { kind: 'match'; event: MatchEvent }
   | { kind: 'matchstart' }
   | { kind: 'halftime' }
   | { kind: 'fulltime' }
+  | { kind: 'etstart' }
+  | { kind: 'ethalftime' }
+  | { kind: 'etfulltime' }
+  | { kind: 'penaltystart' }
+  | { kind: 'penalty'; penalty: Penalty; homeScore: number; awayScore: number }
+  | { kind: 'penaltyfulltime'; homeScore: number; awayScore: number }
 
 // 2 match minutes = 1 real second → tick every 100ms = 0.2 match minutes
 const TICK_MS = 100
@@ -373,10 +439,19 @@ export default function App() {
   const firedRef = useRef<Set<string>>(new Set())
   const halfFiredRef = useRef(false)
   const fullFiredRef = useRef(false)
+  const etHalfFiredRef = useRef(false)
+  const etFullFiredRef = useRef(false)
+  const penaltyStartFiredRef = useRef(false)
+  const penaltyIndexRef = useRef(0)        // next penalty to fire
+  const penaltyFullFiredRef = useRef(false)
+  const [firedPenaltyIds, setFiredPenaltyIds] = useState<Set<string>>(new Set())
+  const firedPenaltyIdsRef = useRef<Set<string>>(new Set())
   const pausedRef = useRef(false) // sync ref so interval sees pause immediately
   const [lastFiredType, setLastFiredType] = useState<EventType | null>(null)
   const eventsRef = useRef(config.events)
   useEffect(() => { eventsRef.current = config.events }, [config.events])
+  const penaltiesRef = useRef(config.penalties)
+  useEffect(() => { penaltiesRef.current = config.penalties }, [config.penalties])
 
   // Recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -437,6 +512,13 @@ export default function App() {
     firedRef.current = new Set()
     halfFiredRef.current = false
     fullFiredRef.current = false
+    etHalfFiredRef.current = false
+    etFullFiredRef.current = false
+    penaltyStartFiredRef.current = false
+    penaltyIndexRef.current = 0
+    penaltyFullFiredRef.current = false
+    firedPenaltyIdsRef.current = new Set()
+    setFiredPenaltyIds(new Set())
     setLastFiredType(null)
   }, [])
 
@@ -461,92 +543,191 @@ export default function App() {
 
       setCurrentMinute(m => {
         const next = parseFloat((m + MINS_PER_TICK).toFixed(2))
-
         const events = eventsRef.current
-        const pendingAny = events.some(e => !firedRef.current.has(e.id))
+        const hasET = eventsRef.current.some(e => e.minute > 90)
+        const startPause = () => { pausedRef.current = true; pausedForRef.current = 3000 }
 
-        // "First-half added time" events: base minute is 45, have addedTime > 0
-        // These display as 45+N but their effective minute may interleave with second-half events
-        // Halftime should fire only after ALL events with base minute <= 45 are shown
-        const pendingHalfTimeBlock = events.some(
-          e => e.minute <= 45 && e.addedTime === 0 && !firedRef.current.has(e.id)
-        )
-        // Added-time events at 45 — sorted by effective minute, fire when clock reaches them
-        const pendingFirstHalfAdded = events.some(
-          e => e.minute === 45 && e.addedTime > 0 && !firedRef.current.has(e.id)
-        )
+        // ── helpers ──────────────────────────────────────
+        const pending = (pred: (e: MatchEvent) => boolean) =>
+          events.some(e => !firedRef.current.has(e.id) && pred(e))
+        const maxEffective = (pred: (e: MatchEvent) => boolean, fallback: number) =>
+          events.filter(pred).reduce((max, e) => Math.max(max, e.minute + e.addedTime), fallback)
 
-        // During first-half added time zone (clock past 45, halftime not fired):
-        const inFirstHalfAdded = next > 45 && !halfFiredRef.current
+        // ── period flags ─────────────────────────────────
+        const inFirstHalfAdded  = next > 45  && !halfFiredRef.current
+        const inSecondHalfAdded = next > 90  && halfFiredRef.current && !fullFiredRef.current
+        const inET1Added        = next > 105 && fullFiredRef.current && !etHalfFiredRef.current
+        const inET2Added        = next > 120 && etHalfFiredRef.current && !etFullFiredRef.current
+        const inAnyAdded = inFirstHalfAdded || inSecondHalfAdded || inET1Added || inET2Added
 
-        // Fire match events in effective-minute order.
-        // Second-half events (minute > 45) must wait until halftime has fired.
+        // ── fire match events ─────────────────────────────
         const triggered = [...events]
           .sort((a, b) => (a.minute + a.addedTime) - (b.minute + b.addedTime))
           .find(e => {
             if (firedRef.current.has(e.id)) return false
-            if (next < (e.minute + e.addedTime)) return false
-            // Block second-half events until halftime fires
-            if (e.minute > 45 && !halfFiredRef.current) return false
+            if (next < e.minute + e.addedTime) return false
+            if (e.minute > 45  && !halfFiredRef.current)  return false  // block 2nd half until HT
+            if (e.minute > 90  && !fullFiredRef.current)  return false  // block ET1 until FT
+            if (e.minute > 105 && !etHalfFiredRef.current) return false // block ET2 until ET HT
             return true
           })
-
-        const startPause = () => { pausedRef.current = true; pausedForRef.current = 3000 }
 
         if (triggered) {
           firedRef.current.add(triggered.id)
           setSpotlight({ kind: 'match', event: triggered })
           startPause()
-          return inFirstHalfAdded || next > 90 ? next : Math.min(next, 90)
+          return inAnyAdded ? next : Math.min(next, triggered.minute <= 45 ? 45 : triggered.minute <= 90 ? 90 : triggered.minute <= 105 ? 105 : 120)
         }
 
-        // Halftime: after all first-half events shown AND clock is 1 min past the last one
-        const maxFirstHalfMinute = events
-          .filter(e => e.minute <= 45)
-          .reduce((max, e) => Math.max(max, e.minute + e.addedTime), 45)
-        if (next >= maxFirstHalfMinute + 1 && !halfFiredRef.current && !pendingHalfTimeBlock && !pendingFirstHalfAdded) {
+        // ── HALF TIME (45) ────────────────────────────────
+        const maxHT = maxEffective(e => e.minute <= 45, 45)
+        if (!halfFiredRef.current
+          && next >= maxHT + 1
+          && !pending(e => e.minute <= 45)) {
           halfFiredRef.current = true
           setSpotlight({ kind: 'halftime' })
           startPause()
           return next
         }
-
-        // Keep clock advancing through added-time zone (display caps at 45 via displayTime)
         if (inFirstHalfAdded) return next
 
-        // Full time: after all events fired AND 1 minute past the last event minute
-        const maxEventMinute = events.reduce((max, e) => Math.max(max, e.minute + e.addedTime), 90)
-        if (next >= maxEventMinute + 1 && !fullFiredRef.current && !pendingAny) {
+        // ── FULL TIME (90) ────────────────────────────────
+        const maxFT = maxEffective(e => e.minute > 45 && e.minute <= 90, 90)
+        if (!fullFiredRef.current
+          && halfFiredRef.current
+          && next >= maxFT + 1
+          && !pending(e => e.minute > 45 && e.minute <= 90)) {
           fullFiredRef.current = true
-          setSpotlight({ kind: 'fulltime' })
-          startPause()
-          setPlaying(false)
+          if (hasET) {
+            setSpotlight({ kind: 'etstart' })
+            startPause()
+          } else if (penaltiesRef.current.length > 0) {
+            setSpotlight({ kind: 'fulltime' })
+            startPause()
+            // penalty phase picks up after pause
+          } else {
+            setSpotlight({ kind: 'fulltime' })
+            startPause()
+            setPlaying(false)
+          }
           return next
         }
+        if (inSecondHalfAdded) return next
+        if (!fullFiredRef.current) return Math.min(next, 90)
 
-        // Allow clock past 90 while second-half added time events pending, or until fulltime fires
-        const maxEventMinute2 = events.reduce((max, e) => Math.max(max, e.minute + e.addedTime), 90)
-        if (next > 90 && !fullFiredRef.current && next < maxEventMinute2 + 1) return next
+        // ── ET HALF TIME (105) ───────────────────────────
+        const maxETHT = maxEffective(e => e.minute > 90 && e.minute <= 105, 105)
+        if (!etHalfFiredRef.current
+          && fullFiredRef.current
+          && next >= maxETHT + 1
+          && !pending(e => e.minute > 90 && e.minute <= 105)) {
+          etHalfFiredRef.current = true
+          setSpotlight({ kind: 'ethalftime' })
+          startPause()
+          return next
+        }
+        if (inET1Added) return next
+        if (!etHalfFiredRef.current) return Math.min(next, 105)
 
-        return Math.min(next, 90)
+        // ── ET FULL TIME (120) ────────────────────────────
+        const maxETFT = maxEffective(e => e.minute > 105, 120)
+        if (!etFullFiredRef.current
+          && etHalfFiredRef.current
+          && next >= maxETFT + 1
+          && !pending(e => e.minute > 105)) {
+          etFullFiredRef.current = true
+          if (penaltiesRef.current.length > 0) {
+            setSpotlight({ kind: 'etfulltime' })
+            startPause()
+            // penalty phase starts after pause clears
+          } else {
+            setSpotlight({ kind: 'etfulltime' })
+            startPause()
+            setPlaying(false)
+          }
+          return next
+        }
+        if (inET2Added) return next
+
+        return Math.min(next, 120)
       })
     }, TICK_MS)
     return () => clearInterval(id)
   }, [playing])
 
-  // Stop recording 3s after fulltime card appears
+  // ── Penalty phase ─────────────────────────────────────
+  // Fires after the pause following etfulltime (or fulltime if no ET) clears
+  const inPenaltyPhase = (
+    (fullFiredRef.current && !config.hasExtraTime && config.hasPenalties) ||
+    (etFullFiredRef.current && config.hasPenalties)
+  )
+
   useEffect(() => {
-    if (spotlight?.kind === 'fulltime') stopRecording(3000)
-  }, [spotlight, stopRecording])
+    if (!playing || !inPenaltyPhase) return
+    const id = setInterval(() => {
+      if (pausedRef.current) {
+        pausedForRef.current -= TICK_MS
+        if (pausedForRef.current <= 0) {
+          pausedRef.current = false
+          pausedForRef.current = 0
+          setSpotlight(null)
+        }
+        return
+      }
+
+      const penalties = penaltiesRef.current
+
+      // Show penalty start card once
+      if (!penaltyStartFiredRef.current) {
+        penaltyStartFiredRef.current = true
+        setSpotlight({ kind: 'penaltystart' })
+        pausedRef.current = true; pausedForRef.current = 5000
+        return
+      }
+
+      // Fire next penalty
+      const idx = penaltyIndexRef.current
+      if (idx < penalties.length) {
+        const p = penalties[idx]
+        penaltyIndexRef.current = idx + 1
+        firedPenaltyIdsRef.current = new Set([...firedPenaltyIdsRef.current, p.id])
+        setFiredPenaltyIds(new Set(firedPenaltyIdsRef.current))
+        const fired = penalties.slice(0, idx + 1)
+        const homeScore = fired.filter(x => x.team === 'home' && x.scored).length
+        const awayScore = fired.filter(x => x.team === 'away' && x.scored).length
+        setSpotlight({ kind: 'penalty', penalty: p, homeScore, awayScore })
+        pausedRef.current = true; pausedForRef.current = 5000
+        return
+      }
+
+      // All penalties fired
+      if (!penaltyFullFiredRef.current) {
+        penaltyFullFiredRef.current = true
+        const homeScore = penalties.filter(x => x.team === 'home' && x.scored).length
+        const awayScore = penalties.filter(x => x.team === 'away' && x.scored).length
+        setSpotlight({ kind: 'penaltyfulltime', homeScore, awayScore })
+        pausedRef.current = true; pausedForRef.current = 5000
+        setPlaying(false)
+      }
+    }, TICK_MS)
+    return () => clearInterval(id)
+  }, [playing, inPenaltyPhase])
+
+  // Stop recording 3s after final whistle
+  useEffect(() => {
+    if (spotlight?.kind === 'penaltyfulltime') stopRecording(3000)
+    else if ((spotlight?.kind === 'fulltime' || spotlight?.kind === 'etfulltime') && !config.hasPenalties) stopRecording(3000)
+  }, [spotlight, stopRecording, config.hasPenalties])
 
   const toggleConfig = useCallback(() => setShowConfig(v => !v), [])
   const togglePlay = useCallback(async () => {
     if (!playing) {
       if (config.enableRecording) {
         const granted = await startRecording()
-        if (!granted) return // user cancelled picker, don't start playback
+        if (!granted) return
       }
-      if (currentMinute >= 90) {
+      const maxMinute = config.hasExtraTime ? 120 : 90
+      if (currentMinute >= maxMinute) {
         resetPlayback()
         setTimeout(() => {
           setSpotlight({ kind: 'matchstart' })
@@ -563,7 +744,7 @@ export default function App() {
     } else {
       setPlaying(false)
     }
-  }, [playing, currentMinute, resetPlayback, startRecording, config.enableRecording])
+  }, [playing, currentMinute, resetPlayback, startRecording, config.enableRecording, config.hasExtraTime])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -607,22 +788,29 @@ export default function App() {
       return
     }
 
-    if (spotlight.kind === 'matchstart') {
+    if (spotlight.kind === 'matchstart' || spotlight.kind === 'etstart' || spotlight.kind === 'penaltystart') {
       prevSpotlightId.current = spotlight.kind
       setFlashType(null)
       playAudio('/Half_Time.mp3')
       return
     }
-    if (spotlight.kind === 'halftime') {
+    if (spotlight.kind === 'halftime' || spotlight.kind === 'ethalftime') {
       prevSpotlightId.current = spotlight.kind
       setFlashType(null)
       playAudio('/Half_Time.mp3')
       return
     }
-    if (spotlight.kind === 'fulltime') {
+    if (spotlight.kind === 'fulltime' || spotlight.kind === 'etfulltime' || spotlight.kind === 'penaltyfulltime') {
       prevSpotlightId.current = spotlight.kind
       setFlashType(null)
       playAudio('/Final_wistle.mp3')
+      return
+    }
+    if (spotlight.kind === 'penalty') {
+      if (spotlight.penalty.id === prevSpotlightId.current) return
+      prevSpotlightId.current = spotlight.penalty.id
+      setFlashType(null)
+      playAudio(spotlight.penalty.scored ? '/GOAL.mp3' : '/card.mp3')
       return
     }
 
@@ -650,8 +838,10 @@ export default function App() {
   // Derive display values
   const displayTime = (() => {
     const m = currentMinute
-    if (m > 90) return `90+${Math.floor(m - 90)}`
-    if (m > 45 && !halfFiredRef.current) return `45+${Math.floor(m - 45)}`
+    if (m > 120 && !etFullFiredRef.current) return `120+${Math.floor(m - 120)}`
+    if (m > 105 && !etHalfFiredRef.current) return `105+${Math.floor(m - 105)}`
+    if (m > 90  && !fullFiredRef.current)   return `90+${Math.floor(m - 90)}`
+    if (m > 45  && !halfFiredRef.current)   return `45+${Math.floor(m - 45)}`
     return `${Math.floor(m)}`
   })()
   // During playback use fired set; outside playback show all events
@@ -725,9 +915,10 @@ export default function App() {
                 <div className={[
                   'event-spotlight',
                   flashType ? `event-spotlight--flash-${flashType}` : '',
-                  displaySpotlight.kind === 'halftime' ? 'event-spotlight--flash-halftime' : '',
-                  displaySpotlight.kind === 'fulltime' ? 'event-spotlight--flash-fulltime' : '',
-                  displaySpotlight.kind === 'matchstart' ? 'event-spotlight--flash-matchstart' : '',
+                  (displaySpotlight.kind === 'halftime' || displaySpotlight.kind === 'ethalftime') ? 'event-spotlight--flash-halftime' : '',
+                  (displaySpotlight.kind === 'fulltime' || displaySpotlight.kind === 'etfulltime') ? 'event-spotlight--flash-fulltime' : '',
+                  (displaySpotlight.kind === 'matchstart' || displaySpotlight.kind === 'etstart' || displaySpotlight.kind === 'penaltystart' || displaySpotlight.kind === 'penaltyfulltime') ? 'event-spotlight--flash-matchstart' : '',
+                  displaySpotlight.kind === 'penalty' ? (displaySpotlight.penalty.scored ? 'event-spotlight--flash-goal' : 'event-spotlight--flash-red') : '',
                 ].filter(Boolean).join(' ')}>
                   {displaySpotlight.kind === 'matchstart' ? (
                     <div className="spotlight-main spotlight-main--centered">
@@ -746,6 +937,44 @@ export default function App() {
                       <span className="spotlight-halftime-icon">🏁</span>
                       <span className="spotlight-halftime-text">FULL TIME</span>
                       <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'etstart' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">⚡</span>
+                      <span className="spotlight-halftime-text">EXTRA TIME</span>
+                      <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'ethalftime' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">⏱</span>
+                      <span className="spotlight-halftime-text">ET HALF TIME</span>
+                      <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'etfulltime' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">🏁</span>
+                      <span className="spotlight-halftime-text">FULL TIME</span>
+                      <span className="spotlight-halftime-score">{scores.home} – {scores.away}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'penaltystart' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">🎯</span>
+                      <span className="spotlight-halftime-text">PENALTY SHOOTOUT</span>
+                      <span className="spotlight-halftime-score">{config.homeTeam} vs {config.awayTeam}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'penalty' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">{displaySpotlight.penalty.scored ? '⚽' : '❌'}</span>
+                      <span className="spotlight-halftime-text">{displaySpotlight.penalty.scored ? 'SCORED' : 'MISSED'}</span>
+                      <span className="spotlight-player" style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginTop: 4 }}>{getTeamName(displaySpotlight.penalty.team)}</span>
+                      <span className="spotlight-player" style={{ fontSize: 18, color: 'rgba(255,255,255,0.8)' }}>{displaySpotlight.penalty.player}</span>
+                      <span className="spotlight-halftime-score" style={{ marginTop: 8 }}>{displaySpotlight.homeScore} – {displaySpotlight.awayScore}</span>
+                    </div>
+                  ) : displaySpotlight.kind === 'penaltyfulltime' ? (
+                    <div className="spotlight-main spotlight-main--centered">
+                      <span className="spotlight-halftime-icon">🏆</span>
+                      <span className="spotlight-halftime-text">SHOOTOUT</span>
+                      <span className="spotlight-halftime-score">{displaySpotlight.homeScore} – {displaySpotlight.awayScore}</span>
                     </div>
                   ) : (
                     <>
@@ -789,75 +1018,132 @@ export default function App() {
             </div>
 
             <div className="bottom-section">
-              <div className="timeline-wrapper">
-                <div className="timeline-row">
-                  <span className="time-label">0'</span>
-                  <div className="timeline-track">
-                    {eventsUpToNow.map((e) => {
-                      // Added-time events stack at their base minute (45 or 90)
-                      const pinMinute = e.addedTime > 0 ? e.minute : (e.minute + e.addedTime)
-                      const left = `${(Math.min(pinMinute, 90) / 90) * 100}%`
-                      // Stack multiple added-time events at same base minute vertically
-                      const addedAtSameBase = e.addedTime > 0
-                        ? eventsUpToNow.filter(x => x.addedTime > 0 && x.minute === e.minute)
-                        : []
-                      const stackIndex = addedAtSameBase.indexOf(e)
-                      const yOffset = e.addedTime > 0 ? stackIndex * -14 : 0
-                      return (
-                        <div key={e.id}
-                          className={`track-marker track-marker--${e.type}`}
-                          style={{ left, transform: `translate(-50%, calc(-50% + ${yOffset}px))` }}
-                          title={`${e.player} ${fmtMinute(e)}'`}
-                        >
-                          {e.type === 'goal' ? '⚽' : e.type === 'yellow' ? '🟨' : '🟥'}
+              {inPenaltyPhase ? (
+                <div className="penalty-shootout">
+                  {(['home', 'away'] as const).map(side => {
+                    const sideColor = side === 'home' ? homeColor : awayColor
+                    const sideIso   = side === 'home' ? homeIso  : awayIso
+                    const sideInit  = side === 'home' ? config.homeInitials : config.awayInitials
+                    const kicks = config.penalties.filter(p => p.team === side)
+                    return (
+                      <div key={side} className="penalty-row">
+                        {side === 'home' && (
+                          <div className="penalty-flag">
+                            <TeamCircle color={sideColor} initials={sideInit} iso={sideIso} />
+                          </div>
+                        )}
+                        <div className="penalty-kicks">
+                          {Array.from({ length: Math.max(5, kicks.length) }).map((_, i) => {
+                            const kick = kicks[i]
+                            const fired = kick && firedPenaltyIds.has(kick.id)
+                            return (
+                              <div key={kick?.id ?? `empty-${side}-${i}`} className={[
+                                'penalty-kick',
+                                fired && kick.scored  ? 'penalty-kick--scored' : '',
+                                fired && !kick.scored ? 'penalty-kick--missed' : '',
+                              ].filter(Boolean).join(' ')} />
+                            )
+                          })}
                         </div>
-                      )
-                    })}
-                    {/* Timeline indicator: shows minute when running, event icon during pause */}
-                    {(playing || currentMinute > 0) && (() => {
-                      // Cap dot position: added time stays pinned at 45 or 90
-                      const dotMinute = currentMinute > 90 ? 90 : currentMinute > 45 && !halfFiredRef.current ? 45 : Math.min(currentMinute, 90)
-                      const dotLeft = `${(dotMinute / 90) * 100}%`
-                      const pausedMatchEvent = spotlight?.kind === 'match' ? spotlight.event : null
-                      if (pausedMatchEvent) {
-                        // Show event icon during event pause
-                        const iconMap: Record<EventType, string> = { goal: '👟', yellow: '🟨', red: '🟥' }
-                        return (
-                          <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
-                            <span className="timeline-dot-icon">{iconMap[pausedMatchEvent.type]}</span>
+                        {side === 'away' && (
+                          <div className="penalty-flag">
+                            <TeamCircle color={sideColor} initials={sideInit} iso={sideIso} />
                           </div>
-                        )
-                      }
-                      if (spotlight?.kind === 'halftime' || spotlight?.kind === 'fulltime') {
-                        return (
-                          <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
-                            <span className="timeline-dot-icon">⏱</span>
-                          </div>
-                        )
-                      }
-                      // After an event: show its icon lingering on the dot
-                      if (lastFiredType) {
-                        const iconMap: Record<EventType, string> = { goal: '⚽', yellow: '🟨', red: '🟥' }
-                        return (
-                          <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
-                            <span className="timeline-dot-icon">{iconMap[lastFiredType]}</span>
-                          </div>
-                        )
-                      }
-                      // Normal running — show current minute
-                      return (
-                        <div className="timeline-dot timeline-dot--running" style={{ left: dotLeft }}>
-                          <span className="timeline-dot-minute">{displayTime}'</span>
-                        </div>
-                      )
-                    })()}
-                    {/* Static dot when not in playback mode */}
-                    {!playing && currentMinute === 0 && eventsUpToNow.length > 0 && (
-                      <div className="timeline-dot" style={{ left: `${(eventsUpToNow[eventsUpToNow.length - 1].minute / 90) * 100}%` }} />
-                    )}
-                  </div>
-                  <span className="time-label right">90'</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
+              ) : null}
+              <div className="timeline-wrapper" style={inPenaltyPhase ? { display: 'none' } : {}}>
+                {(() => {
+                  // During ET (after fulltime fires) show 90–120 window, otherwise 0–90
+                  const inET = fullFiredRef.current
+                  const tStart = inET ? 90 : 0
+                  const tEnd   = inET ? 120 : 90
+                  const tRange = tEnd - tStart
+
+                  const toLeft = (min: number) => `${(Math.max(0, Math.min(min - tStart, tRange)) / tRange) * 100}%`
+
+                  // Dot clamping per period
+                  const dotMinute = (() => {
+                    const m = currentMinute
+                    if (inET) {
+                      if (m > 120) return 120
+                      if (m > 105 && !etHalfFiredRef.current) return 105
+                      return Math.min(m, 120)
+                    }
+                    if (m > 90) return 90
+                    if (m > 45 && !halfFiredRef.current) return 45
+                    return Math.min(m, 90)
+                  })()
+
+                  const visibleEvents = eventsUpToNow.filter(e =>
+                    inET ? e.minute > 90 : e.minute <= 90
+                  )
+
+                  return (
+                    <div className="timeline-row">
+                      <span className="time-label">{tStart}'</span>
+                      <div className="timeline-track">
+                        {visibleEvents.map((e) => {
+                          const pinMinute = e.addedTime > 0 ? e.minute : e.minute
+                          const left = toLeft(Math.min(pinMinute, tEnd))
+                          const addedAtSameBase = e.addedTime > 0
+                            ? visibleEvents.filter(x => x.addedTime > 0 && x.minute === e.minute)
+                            : []
+                          const stackIndex = addedAtSameBase.indexOf(e)
+                          const yOffset = e.addedTime > 0 ? stackIndex * -14 : 0
+                          return (
+                            <div key={e.id}
+                              className={`track-marker track-marker--${e.type}`}
+                              style={{ left, transform: `translate(-50%, calc(-50% + ${yOffset}px))` }}
+                              title={`${e.player} ${fmtMinute(e)}'`}
+                            >
+                              {e.type === 'goal' ? '⚽' : e.type === 'yellow' ? '🟨' : '🟥'}
+                            </div>
+                          )
+                        })}
+                        {(playing || currentMinute > 0) && (() => {
+                          const dotLeft = toLeft(dotMinute)
+                          const pausedMatchEvent = spotlight?.kind === 'match' ? spotlight.event : null
+                          if (pausedMatchEvent) {
+                            const iconMap: Record<EventType, string> = { goal: '👟', yellow: '🟨', red: '🟥' }
+                            return (
+                              <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
+                                <span className="timeline-dot-icon">{iconMap[pausedMatchEvent.type]}</span>
+                              </div>
+                            )
+                          }
+                          if (spotlight && ['halftime','fulltime','etstart','ethalftime','etfulltime'].includes(spotlight.kind)) {
+                            return (
+                              <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
+                                <span className="timeline-dot-icon">⏱</span>
+                              </div>
+                            )
+                          }
+                          if (lastFiredType) {
+                            const iconMap: Record<EventType, string> = { goal: '⚽', yellow: '🟨', red: '🟥' }
+                            return (
+                              <div className="timeline-dot timeline-dot--event" style={{ left: dotLeft }}>
+                                <span className="timeline-dot-icon">{iconMap[lastFiredType]}</span>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div className="timeline-dot timeline-dot--running" style={{ left: dotLeft }}>
+                              <span className="timeline-dot-minute">{displayTime}'</span>
+                            </div>
+                          )
+                        })()}
+                        {!playing && currentMinute === 0 && visibleEvents.length > 0 && (
+                          <div className="timeline-dot" style={{ left: toLeft(visibleEvents[visibleEvents.length - 1].minute) }} />
+                        )}
+                      </div>
+                      <span className="time-label right">{tEnd}'</span>
+                    </div>
+                  )
+                })()}
               </div>
 
               <div className="event-feed">

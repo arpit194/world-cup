@@ -1200,3 +1200,73 @@ body {
 }
 
 .cfg-save-btn:hover { background: #e8c84a; }
+
+/* ── Penalty Shootout UI ──────────────────────────────── */
+.penalty-shootout {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0 8px;
+  width: 100%;
+}
+
+.penalty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.penalty-flag {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.penalty-flag svg,
+.penalty-flag .flag-img-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.penalty-kicks {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.penalty-kick {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.12);
+  border: 1.5px solid rgba(255,255,255,0.2);
+  transition: background 0.3s, border-color 0.3s;
+  flex-shrink: 0;
+}
+
+.penalty-kick--scored {
+  background: rgba(0, 200, 80, 0.55);
+  border-color: rgba(0, 200, 80, 0.9);
+}
+
+.penalty-kick--missed {
+  background: rgba(220, 30, 30, 0.55);
+  border-color: rgba(220, 30, 30, 0.9);
+}
+
+/* Configurator penalty card */
+.cfg-event-card--penalty {
+  border-color: rgba(212, 175, 55, 0.4);
+}
+
+.cfg-penalty-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #D4AF37;
+  letter-spacing: 1px;
+  min-width: 20px;
+}
